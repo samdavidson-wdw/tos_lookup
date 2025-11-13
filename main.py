@@ -2,14 +2,75 @@
 import sys
 import csv
 import json
+import os
+import subprocess
+import threading
 from pathlib import Path
+from typing import Optional
+
+import requests
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLineEdit, QComboBox, QPushButton, QTableWidget, QTableWidgetItem,
-    QLabel, QHeaderView, QAbstractItemView, QProgressBar, QFileDialog, QStatusBar
+    QLabel, QHeaderView, QAbstractItemView, QProgressBar, QFileDialog, QStatusBar,
+    QMessageBox, QProgressDialog
 )
 from PySide6.QtCore import Qt, QThread, Signal, QTimer
+
 from database import search_tickets, export_tickets
+
+# ==================== AUTO-UPDATE CONFIG ====================
+GITHUB_REPO = "samdavidson-wdw/tos_lookup" 
+CURRENT_VERSION = "1.1.0"  
+# ===========================================================
+
+class UpdateChecker(QThread):
+    update_available = Signal(str, str)  # version, download_url
+    no_update = Signal()
+
+    def run(self):
+        try:
+            response = requests.get(f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest", timeout=10)
+            if response.status_code != 200:
+                self.no_update.emit()
+                return
+            data = response.json()
+            latest = data["tag_name"].lstrip("v")
+            if latest > CURRENT_VERSION:
+                asset = next((a for a in data["assets"] if a["name"].endswith(".exe")), None)
+                if asset:
+                    self.update_available.emit(latest, asset["browser_download_url"])
+                else:
+                    self.no_update.emit()
+            else:
+                self.no_update.emit()
+        except:
+            self.no_update.emit()
+
+class Downloader(QThread):
+    progress = Signal(int, int)  # current, total
+    finished = Signal(str)       # installer path
+    error = Signal(str)
+
+    def __init__(self, url: str):
+        super().__init__()
+        self.url = url
+
+    def run(self):
+        try:
+            response = requests.get(self.url, stream=True)
+            total = int(response.headers.get('content-length', 0))
+            path = Path("update_installer.exe")
+            downloaded = 0
+            with open(path, "wb") as f:
+                for chunk in response.iter_content(1024):
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        self.progress.emit(downloaded, total)
+            self.finished.emit(str(path))
+        except Exception as e:
+            self.error.emit(str(e))
 
 class SearchWorker(QThread):
     finished = Signal(dict)
@@ -18,7 +79,6 @@ class SearchWorker(QThread):
         self.search = search
         self.status = status
         self.page = page
-
     def run(self):
         result = search_tickets(self.search, self.status, self.page)
         self.finished.emit(result)
@@ -43,8 +103,10 @@ class MainWindow(QMainWindow):
 
         self.init_ui()
         self.apply_theme()
+        self.check_for_updates()  # AUTO-UPDATE ON START
         self.refresh()
 
+    # === Theme Methods (unchanged) ===
     def load_theme(self) -> bool:
         if self.config_path.exists():
             try:
@@ -70,6 +132,58 @@ class MainWindow(QMainWindow):
             self.setStyleSheet(path.read_text(encoding="utf-8"))
         self.theme_toggle.setChecked(self.dark_mode)
 
+    # === AUTO-UPDATE ===
+    def check_for_updates(self):
+        self.update_checker = UpdateChecker()
+        self.update_checker.update_available.connect(self.on_update_available)
+        self.update_checker.no_update.connect(lambda: None)
+        self.update_checker.start()
+
+    def on_update_available(self, version: str, url: str):
+        reply = QMessageBox.question(
+            self, "Update Available",
+            f"Version {version} is available!\n\nDownload and install now?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if reply == QMessageBox.Yes:
+            self.start_download(url)
+
+    def start_download(self, url: str):
+        self.progress_dialog = QProgressDialog("Downloading update...", "Cancel", 0, 100, self)
+        self.progress_dialog.setWindowTitle("Updating...")
+        self.progress_dialog.setWindowModality(Qt.WindowModal)
+        self.progress_dialog.canceled.connect(lambda: self.downloader.terminate())
+
+        self.downloader = Downloader(url)
+        self.downloader.progress.connect(self.update_progress)
+        self.downloader.finished.connect(self.on_download_complete)
+        self.downloader.error.connect(lambda msg: QMessageBox.critical(self, "Error", f"Download failed:\n{msg}"))
+        self.downloader.start()
+
+    def update_progress(self, current: int, total: int):
+        if total > 0:
+            percent = int(current * 100 / total)
+            self.progress_dialog.setValue(percent)
+            self.progress_dialog.setLabelText(f"Downloading... {current // 1024} KB / {total // 1024} KB")
+
+    def on_download_complete(self, installer_path: str):
+        self.progress_dialog.close()
+        reply = QMessageBox.information(
+            self, "Update Ready",
+            "Update downloaded. The app will now restart and install the new version.",
+            QMessageBox.Ok
+        )
+        if reply == QMessageBox.Ok:
+            self.install_update(installer_path)
+
+    def install_update(self, installer_path: str):
+        try:
+            subprocess.Popen([installer_path, "/SILENT", "/CLOSEAPPLICATIONS"])
+            QApplication.quit()
+        except Exception as e:
+            QMessageBox.critical(self, "Install Failed", f"Could not start installer:\n{e}")
+
+    # === UI (unchanged) ===
     def init_ui(self):
         central = QWidget()
         self.setCentralWidget(central)
@@ -92,7 +206,6 @@ class MainWindow(QMainWindow):
         self.export_btn.setObjectName("exportBtn")
         self.export_btn.clicked.connect(self.export_csv)
 
-        # === Theme Toggle ===
         self.theme_toggle = QPushButton()
         self.theme_toggle.setCheckable(True)
         self.theme_toggle.setFixedSize(50, 28)
@@ -157,7 +270,6 @@ class MainWindow(QMainWindow):
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
 
-        # Timer to refresh toggle style
         QTimer.singleShot(100, self.update_toggle_style)
 
     def update_toggle_style(self):
@@ -187,6 +299,7 @@ class MainWindow(QMainWindow):
         }
         """
 
+    # === Search & Pagination ===
     def on_search(self):
         self.current_page = 1
         self.refresh()
@@ -217,12 +330,10 @@ class MainWindow(QMainWindow):
         self.prev_btn.setEnabled(self.current_page > 1)
         self.next_btn.setEnabled(self.current_page < self.total_pages)
 
-        # Update stats
         for key in self.stats_labels:
             value = stats.get(key, 0)
             self.stats_labels[key].setText(f"<b>{value}</b>")
 
-        # Update table
         self.table.setRowCount(len(tickets))
         for i, t in enumerate(tickets):
             self.table.setItem(i, 0, QTableWidgetItem(t["id"]))
@@ -240,7 +351,6 @@ class MainWindow(QMainWindow):
         )
         if not path:
             return
-
         try:
             tickets = export_tickets(self.last_search, self.last_status)
             with open(path, "w", newline="", encoding="utf-8") as f:
