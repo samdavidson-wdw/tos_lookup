@@ -2,8 +2,12 @@
 import sqlite3
 from typing import List, Dict, Any
 from pathlib import Path
+from dotenv import load_dotenv
+import os
 
-DB_PATH = f"\\\\wdw.disney.com\\data\\WCCTelecom\\Data\\Public\\Wi-Fi Reports\\tickets.db"
+load_dotenv()
+
+DB_PATH = os.getenv("DB_PATH")
 
 def get_connection():
     return sqlite3.connect(DB_PATH)
