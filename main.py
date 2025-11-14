@@ -196,7 +196,7 @@ class MainWindow(QMainWindow):
         self.search_input.returnPressed.connect(self.on_search)
 
         self.status_combo = QComboBox()
-        self.status_combo.addItems(["All", "Resolved", "Assigned", "Pending", "Work in Progress", "Closed"])
+        self.status_combo.addItems(["All", "Resolved", "Assigned", "Pending", "Work in Progress", "Cancelled", "Closed"])
         self.status_combo.currentTextChanged.connect(self.on_search)
 
         self.refresh_btn = QPushButton("Refresh")
