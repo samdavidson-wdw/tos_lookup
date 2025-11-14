@@ -227,7 +227,7 @@ class MainWindow(QMainWindow):
         self.stats_labels = {}
         for key, label in [
             ("total", "Total"), ("resolved", "Resolved"),
-            ("inProgress", "In Progress"), ("pending", "Pending")
+            ("inProgress", "In Progress"), ("pending", "Pending"), ("cancelled", "Cancelled")
         ]:
             lbl = QLabel()
             self.stats_labels[key] = lbl
