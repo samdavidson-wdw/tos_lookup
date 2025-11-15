@@ -21,7 +21,7 @@ from database import search_tickets, export_tickets
 
 # ==================== AUTO-UPDATE CONFIG ====================
 GITHUB_REPO = "samdavidson-wdw/tos_lookup" 
-CURRENT_VERSION = "1.10"  
+CURRENT_VERSION = "1.20"  
 # ===========================================================
 
 class UpdateChecker(QThread):
