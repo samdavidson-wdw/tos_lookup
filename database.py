@@ -4,7 +4,7 @@ from typing import List, Dict, Any
 from pathlib import Path
 
 
-DB_PATH = f'\\wdw.disney.com\data\WCCTelecom\Data\Public\Wi-Fi Reports\tickets.db`'
+DB_PATH = "\\\\wdw.disney.com\\data\\WCCTelecom\\Data\\Public\\Wi-Fi Reports\\tickets.db"
 
 def get_connection():
     return sqlite3.connect(DB_PATH)
