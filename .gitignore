@@ -1,5 +1,10 @@
-.env
+# Build artifacts
 dist/
 build/
-*.db
 *.spec
+
+# Environment
+.env
+
+# Local databases
+*.db
